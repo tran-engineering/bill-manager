@@ -1,37 +1,224 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io;
-use std::process::Command;
+use std::path::PathBuf;
+use std::sync::LazyLock;
 
 use crate::app::{Bill, Client};
 use crate::types::Address;
 
 use text_placeholder::Template;
+use typst::diag::{FileError, FileResult, PackageError, PackageResult};
+use typst::foundations::{Bytes, Datetime};
+use typst::syntax::{FileId, Source, VirtualPath, package::PackageSpec};
+use typst::text::{Font, FontBook};
+use typst::utils::LazyHash;
+use typst::{Library, LibraryExt, World};
+use typst_pdf::PdfOptions;
+
+static FONTS: LazyLock<Vec<Font>> = LazyLock::new(|| {
+    let mut fonts = Vec::new();
+
+    // Load bundled fonts from typst-assets
+    fonts.extend(
+        typst_assets::fonts()
+            .flat_map(|data| Font::iter(Bytes::new(data)))
+    );
+
+    // Load system fonts
+    let font_paths = [
+        // Linux
+        "/usr/share/fonts",
+        "/usr/local/share/fonts",
+        // User fonts
+        &format!("{}/.fonts", std::env::var("HOME").unwrap_or_default()),
+        &format!("{}/.local/share/fonts", std::env::var("HOME").unwrap_or_default()),
+    ];
+
+    for font_dir in &font_paths {
+        if std::path::Path::new(font_dir).exists() {
+            load_fonts_from_dir(&mut fonts, font_dir);
+        }
+    }
+
+    fonts
+});
+
+fn load_fonts_from_dir(fonts: &mut Vec<Font>, dir: &str) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+
+            if path.is_dir() {
+                load_fonts_from_dir(fonts, path.to_str().unwrap());
+            } else if let Some(ext) = path.extension() {
+                if matches!(ext.to_str(), Some("ttf") | Some("otf") | Some("TTF") | Some("OTF")) {
+                    if let Ok(data) = std::fs::read(&path) {
+                        fonts.extend(Font::iter(Bytes::new(data)));
+                    }
+                }
+            }
+        }
+    }
+}
+
+static LIBRARY: LazyLock<LazyHash<Library>> = LazyLock::new(|| {
+    LazyHash::new(Library::builder().build())
+});
+
+static BOOK: LazyLock<LazyHash<FontBook>> = LazyLock::new(|| {
+    LazyHash::new(FontBook::from_fonts(FONTS.iter()))
+});
+
+struct TypstWorld {
+    source: Source,
+    main_id: FileId,
+    package_cache: PathBuf,
+}
+
+impl TypstWorld {
+    fn new(source_text: String) -> Self {
+        let main_id = FileId::new(None, VirtualPath::new("main.typ"));
+        let source = Source::new(main_id, source_text);
+
+        // Use system cache directory for packages
+        let package_cache = dirs::cache_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("typst")
+            .join("packages");
+
+        Self {
+            source,
+            main_id,
+            package_cache,
+        }
+    }
+
+    fn resolve_package(&self, spec: &PackageSpec) -> PackageResult<PathBuf> {
+        let package_dir = self.package_cache
+            .join(spec.namespace.as_str())
+            .join(spec.name.as_str())
+            .join(spec.version.to_string());
+
+        if package_dir.exists() {
+            Ok(package_dir)
+        } else {
+            // Try to download the package
+            self.download_package(spec)
+        }
+    }
+
+    fn download_package(&self, spec: &PackageSpec) -> PackageResult<PathBuf> {
+        let package_dir = self.package_cache
+            .join(spec.namespace.as_str())
+            .join(spec.name.as_str())
+            .join(spec.version.to_string());
+
+        if package_dir.exists() {
+            return Ok(package_dir);
+        }
+
+        // Create the directory
+        fs::create_dir_all(&package_dir)
+            .map_err(|e| PackageError::Other(Some(format!("Failed to create package directory: {}", e).into())))?;
+
+        // Download from Typst package registry
+        let url = format!(
+            "https://packages.typst.org/{}/{}-{}.tar.gz",
+            spec.namespace,
+            spec.name,
+            spec.version
+        );
+
+        // For now, return an error with instructions
+        Err(PackageError::Other(Some(
+            format!(
+                "Package '{}' not found in cache. Please download it manually:\n\
+                 1. Download from: {}\n\
+                 2. Extract to: {}\n\
+                 Or run: typst compile (with the CLI) to auto-download packages",
+                spec,
+                url,
+                package_dir.display()
+            ).into()
+        )))
+    }
+}
+
+impl World for TypstWorld {
+    fn library(&self) -> &LazyHash<Library> {
+        &LIBRARY
+    }
+
+    fn book(&self) -> &LazyHash<FontBook> {
+        &BOOK
+    }
+
+    fn main(&self) -> FileId {
+        self.main_id
+    }
+
+    fn source(&self, id: FileId) -> FileResult<Source> {
+        if id == self.main_id {
+            Ok(self.source.clone())
+        } else if let Some(package_spec) = id.package() {
+            // Handle package files
+            let package_dir = self.resolve_package(package_spec)
+                .map_err(|e| FileError::Package(e))?;
+
+            let file_path = package_dir.join(id.vpath().as_rootless_path());
+
+            let text = fs::read_to_string(&file_path)
+                .map_err(|_| FileError::NotFound(file_path))?;
+
+            Ok(Source::new(id, text))
+        } else {
+            Err(FileError::NotFound(id.vpath().as_rootless_path().into()))
+        }
+    }
+
+    fn file(&self, id: FileId) -> FileResult<Bytes> {
+        if let Some(package_spec) = id.package() {
+            // Handle package files
+            let package_dir = self.resolve_package(package_spec)
+                .map_err(|e| FileError::Package(e))?;
+
+            let file_path = package_dir.join(id.vpath().as_rootless_path());
+
+            let data = fs::read(&file_path)
+                .map_err(|_| FileError::NotFound(file_path))?;
+
+            Ok(Bytes::new(data))
+        } else {
+            Err(FileError::NotFound(id.vpath().as_rootless_path().into()))
+        }
+    }
+
+    fn font(&self, index: usize) -> Option<Font> {
+        FONTS.get(index).cloned()
+    }
+
+    fn today(&self, _offset: Option<i64>) -> Option<Datetime> {
+        Datetime::from_ymd(2024, 1, 1)
+    }
+}
 
 pub fn generate_bill_pdf(
     bill: &Bill,
     client: &Client,
     creditor: &Address,
 ) -> Result<Vec<u8>, String> {
-    // Create Typst document content
     let typst_content = create_typst_invoice(bill, client, creditor);
-    // Create a SystemWorld (loads fonts, stdlib, etc.)
-    fs::write("temp.typ", typst_content).unwrap();
 
-    Command::new("typst")
-        .args(["compile", "temp.typ", "output.pdf"])
-        .status()
-        .unwrap();
+    let world = TypstWorld::new(typst_content);
 
-    let pdf_data = read_file_as_bytes("output.pdf").unwrap();
+    let result = typst::compile(&world);
+    let document = result.output
+        .map_err(|errors| format!("Typst compilation failed: {:?}", errors))?;
 
-    let _ = fs::remove_file("temp.typ");
+    let pdf_data = typst_pdf::pdf(&document, &PdfOptions::default())
+        .map_err(|e| format!("PDF generation failed: {:?}", e))?;
 
     Ok(pdf_data)
-}
-
-fn read_file_as_bytes(path: &str) -> io::Result<Vec<u8>> {
-    fs::read(path)
 }
 
 fn create_typst_invoice(bill: &Bill, client: &Client, creditor: &Address) -> String {

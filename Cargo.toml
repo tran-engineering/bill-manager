@@ -16,3 +16,4 @@ typst-pdf = "0.14.0"
 typst-assets = "0.14.0"    # for bundled assets / fonts / stdlib
 comemo = "0.4"            # maybe needed by typst
 text_placeholder = "0.5.1"
+dirs = "6.0.0"
