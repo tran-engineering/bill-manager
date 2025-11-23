@@ -15,7 +15,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "Bill Manager - Swiss QR Bill",
+        "Bill Manager",
         options,
         Box::new(|cc| Ok(Box::new(BillManagerApp::new(cc)))),
     )
