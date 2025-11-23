@@ -73,6 +73,7 @@ struct TypstWorld {
     source: Source,
     main_id: FileId,
     package_cache: PathBuf,
+    template_dir: PathBuf,
 }
 
 impl TypstWorld {
@@ -86,10 +87,14 @@ impl TypstWorld {
             .join("typst")
             .join("packages");
 
+        // Template directory for local files
+        let template_dir = PathBuf::from("templates");
+
         Self {
             source,
             main_id,
             package_cache,
+            template_dir,
         }
     }
 
@@ -189,7 +194,13 @@ impl World for TypstWorld {
 
             Ok(Bytes::new(data))
         } else {
-            Err(FileError::NotFound(id.vpath().as_rootless_path().into()))
+            // Handle local files relative to template directory
+            let file_path = self.template_dir.join(id.vpath().as_rootless_path());
+
+            let data = fs::read(&file_path)
+                .map_err(|_| FileError::NotFound(file_path))?;
+
+            Ok(Bytes::new(data))
         }
     }
 
