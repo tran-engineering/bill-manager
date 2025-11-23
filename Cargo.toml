@@ -1,0 +1,18 @@
+[package]
+name = "swiss-qr-bill"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+qrcode = "0.14.1"
+eframe = "0.33.2"
+egui = "0.33.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+typst = "0.14.0"
+typst-pdf = "0.14.0"
+typst-assets = "0.14.0"    # for bundled assets / fonts / stdlib
+comemo = "0.4"            # maybe needed by typst
+text_placeholder = "0.5.1"
