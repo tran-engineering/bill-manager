@@ -13,67 +13,21 @@ use typst::syntax::{FileId, Source, VirtualPath, package::PackageSpec};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Library, LibraryExt, World};
+use typst_kit::fonts::{FontSearcher, FontSlot};
 use typst_pdf::PdfOptions;
-
-static FONTS: LazyLock<Vec<Font>> = LazyLock::new(|| {
-    let mut fonts = Vec::new();
-
-    // Load bundled fonts from typst-assets
-    fonts.extend(
-        typst_assets::fonts()
-            .flat_map(|data| Font::iter(Bytes::new(data)))
-    );
-
-    // Load system fonts
-    let font_paths = [
-        // Linux
-        "/usr/share/fonts",
-        "/usr/local/share/fonts",
-        // User fonts
-        &format!("{}/.fonts", std::env::var("HOME").unwrap_or_default()),
-        &format!("{}/.local/share/fonts", std::env::var("HOME").unwrap_or_default()),
-    ];
-
-    for font_dir in &font_paths {
-        if std::path::Path::new(font_dir).exists() {
-            load_fonts_from_dir(&mut fonts, font_dir);
-        }
-    }
-
-    fonts
-});
-
-fn load_fonts_from_dir(fonts: &mut Vec<Font>, dir: &str) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-
-            if path.is_dir() {
-                load_fonts_from_dir(fonts, path.to_str().unwrap());
-            } else if let Some(ext) = path.extension() {
-                if matches!(ext.to_str(), Some("ttf") | Some("otf") | Some("TTF") | Some("OTF")) {
-                    if let Ok(data) = std::fs::read(&path) {
-                        fonts.extend(Font::iter(Bytes::new(data)));
-                    }
-                }
-            }
-        }
-    }
-}
 
 static LIBRARY: LazyLock<LazyHash<Library>> = LazyLock::new(|| {
     LazyHash::new(Library::builder().build())
 });
 
-static BOOK: LazyLock<LazyHash<FontBook>> = LazyLock::new(|| {
-    LazyHash::new(FontBook::from_fonts(FONTS.iter()))
-});
 
 struct TypstWorld {
     source: Source,
     main_id: FileId,
     package_cache: PathBuf,
     template_dir: PathBuf,
+    book: LazyHash<FontBook>,
+    fonts: Vec<FontSlot>,
 }
 
 impl TypstWorld {
@@ -90,11 +44,16 @@ impl TypstWorld {
         // Template directory for local files
         let template_dir = PathBuf::from("templates");
 
+        let fonts = FontSearcher::new().include_system_fonts(true).search();
+        let book = LazyHash::new(fonts.book);
+
         Self {
             source,
             main_id,
             package_cache,
             template_dir,
+            fonts: fonts.fonts,
+            book,
         }
     }
 
@@ -155,7 +114,7 @@ impl World for TypstWorld {
     }
 
     fn book(&self) -> &LazyHash<FontBook> {
-        &BOOK
+        &self.book
     }
 
     fn main(&self) -> FileId {
@@ -205,7 +164,7 @@ impl World for TypstWorld {
     }
 
     fn font(&self, index: usize) -> Option<Font> {
-        FONTS.get(index).cloned()
+        self.fonts[index].get()
     }
 
     fn today(&self, _offset: Option<i64>) -> Option<Datetime> {

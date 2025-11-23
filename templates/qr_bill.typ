@@ -5,6 +5,8 @@
   margin: 10mm,
 )
 
+#set text(font: "Roboto")
+
 #align(right)[
   #image(
     "logo.svg",
@@ -15,10 +17,8 @@
 Rechnungssteller
 
 {{creditor-name}} \
-{{creditor-street}} \
-{{creditor-building}} \
-{{creditor-postal-code}} \
-{{creditor-city}} \
+{{creditor-street}} \ {{creditor-building}} \
+{{creditor-postal-code}} {{creditor-city}} \
 {{creditor-country}}
 
 #box(width: 80%)[
