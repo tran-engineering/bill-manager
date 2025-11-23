@@ -94,6 +94,8 @@ pub struct Bill {
     pub iban: String,
     pub notes: String,
     pub status: BillStatus,
+    #[serde(skip)]
+    pub pdf_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -181,6 +183,7 @@ impl Default for Bill {
             iban: String::new(),
             notes: String::new(),
             status: BillStatus::Draft,
+            pdf_data: None,
         }
     }
 }
@@ -378,13 +381,47 @@ impl BillManagerApp {
         self.item_templates.retain(|t| t.id != id);
     }
 
-    pub fn generate_pdf(&self, bill: &Bill) -> Result<(), String> {
+    pub fn generate_pdf(&mut self, bill_id: u64) -> Result<(), String> {
+        let bill = self.bills.iter().find(|b| b.id == bill_id)
+            .ok_or_else(|| "Bill not found".to_string())?;
+
         let client = self.get_client(bill.client_id)
             .ok_or_else(|| "Client not found".to_string())?;
 
-        let filename = format!("invoice_{}.pdf", bill.id);
+        // Generate PDF in memory
+        let pdf_data = crate::pdf::generate_bill_pdf(bill, client, &self.creditor_address)?;
 
-        crate::pdf::save_bill_pdf(bill, client, &self.creditor_address, &filename)?;
+        // Save to database
+        let db = self.db.lock().unwrap();
+        db.save_bill_pdf(bill_id, &pdf_data)
+            .map_err(|e| format!("Failed to save PDF to database: {}", e))?;
+        drop(db);
+
+        // Update bill in memory
+        if let Some(bill) = self.bills.iter_mut().find(|b| b.id == bill_id) {
+            bill.pdf_data = Some(pdf_data);
+        }
+
+        Ok(())
+    }
+
+    pub fn save_pdf_to_file(&self, bill_id: u64) -> Result<(), String> {
+        // Use native file dialog
+        let file_dialog = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(&format!("invoice_{}.pdf", bill_id));
+
+        if let Some(path) = file_dialog.save_file() {
+            let bill = self.bills.iter().find(|b| b.id == bill_id)
+                .ok_or_else(|| "Bill not found".to_string())?;
+
+            if let Some(pdf_data) = &bill.pdf_data {
+                std::fs::write(&path, pdf_data)
+                    .map_err(|e| format!("Failed to save PDF: {}", e))?;
+            } else {
+                return Err("PDF not generated yet".to_string());
+            }
+        }
 
         Ok(())
     }

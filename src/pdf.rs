@@ -251,17 +251,3 @@ fn create_typst_invoice(bill: &Bill, client: &Client, creditor: &Address) -> Str
 
     tpl.fill_with_hashmap(&vars)
 }
-
-pub fn save_bill_pdf(
-    bill: &Bill,
-    client: &Client,
-    creditor: &Address,
-    filename: &str,
-) -> Result<(), String> {
-    let pdf_data = generate_bill_pdf(bill, client, creditor)?;
-
-    fs::write(filename, pdf_data)
-        .map_err(|e| format!("Failed to write PDF file: {}", e))?;
-
-    Ok(())
-}

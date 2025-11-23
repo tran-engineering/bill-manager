@@ -47,6 +47,7 @@ impl Database {
                 notes TEXT NOT NULL,
                 status TEXT NOT NULL,
                 items TEXT NOT NULL,
+                pdf_data BLOB,
                 FOREIGN KEY (client_id) REFERENCES clients(id)
             );
 
@@ -57,6 +58,21 @@ impl Database {
             );
             "#,
         )?;
+
+        // Migration: Add pdf_data column if it doesn't exist
+        self.conn.execute_batch(
+            r#"
+            -- Check if pdf_data column exists, if not add it
+            PRAGMA table_info(bills);
+            "#,
+        ).ok();
+
+        // Try to add the column (will fail silently if it already exists)
+        self.conn.execute(
+            "ALTER TABLE bills ADD COLUMN pdf_data BLOB",
+            [],
+        ).ok();
+
         Ok(())
     }
 
@@ -205,8 +221,8 @@ impl Database {
             // Insert new bill
             self.conn.execute(
                 r#"INSERT INTO bills
-                (client_id, date, due_date, reference, iban, notes, status, items)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+                (client_id, date, due_date, reference, iban, notes, status, items, pdf_data)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
                 params![
                     bill.client_id,
                     bill.date.to_rfc3339(),
@@ -216,6 +232,7 @@ impl Database {
                     bill.notes,
                     status_str,
                     items_json,
+                    bill.pdf_data.as_ref().map(|v| v.as_slice()),
                 ],
             )?;
             Ok(self.conn.last_insert_rowid() as u64)
@@ -224,8 +241,8 @@ impl Database {
             self.conn.execute(
                 r#"UPDATE bills SET
                 client_id = ?1, date = ?2, due_date = ?3, reference = ?4,
-                iban = ?5, notes = ?6, status = ?7, items = ?8
-                WHERE id = ?9"#,
+                iban = ?5, notes = ?6, status = ?7, items = ?8, pdf_data = ?9
+                WHERE id = ?10"#,
                 params![
                     bill.client_id,
                     bill.date.to_rfc3339(),
@@ -235,6 +252,7 @@ impl Database {
                     bill.notes,
                     status_str,
                     items_json,
+                    bill.pdf_data.as_ref().map(|v| v.as_slice()),
                     bill.id,
                 ],
             )?;
@@ -242,9 +260,30 @@ impl Database {
         }
     }
 
+    pub fn save_bill_pdf(&self, bill_id: u64, pdf_data: &[u8]) -> Result<()> {
+        self.conn.execute(
+            "UPDATE bills SET pdf_data = ?1 WHERE id = ?2",
+            params![pdf_data, bill_id],
+        )?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn get_bill_pdf(&self, bill_id: u64) -> Result<Option<Vec<u8>>> {
+        let mut stmt = self.conn.prepare("SELECT pdf_data FROM bills WHERE id = ?1")?;
+        let mut rows = stmt.query(params![bill_id])?;
+
+        if let Some(row) = rows.next()? {
+            let pdf_data: Option<Vec<u8>> = row.get(0)?;
+            Ok(pdf_data)
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn get_all_bills(&self) -> Result<Vec<Bill>> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, client_id, date, due_date, reference, iban, notes, status, items
+            r#"SELECT id, client_id, date, due_date, reference, iban, notes, status, items, pdf_data
                FROM bills ORDER BY date DESC"#,
         )?;
 
@@ -279,6 +318,7 @@ impl Database {
                     notes: row.get(6)?,
                     status,
                     items,
+                    pdf_data: row.get(9)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

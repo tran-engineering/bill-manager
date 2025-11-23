@@ -96,7 +96,8 @@ fn show_bills_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
 
     let mut bill_to_delete: Option<u64> = None;
     let mut bill_to_edit: Option<Bill> = None;
-    let mut bill_to_pdf: Option<Bill> = None;
+    let mut bill_to_generate_pdf: Option<u64> = None;
+    let mut bill_to_save_pdf: Option<u64> = None;
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         for bill in app.bills.clone().iter() {
@@ -125,8 +126,22 @@ fn show_bills_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
                         if ui.button("✏ Edit").clicked() {
                             bill_to_edit = Some(bill.clone());
                         }
-                        if ui.button("📄 PDF").clicked() {
-                            bill_to_pdf = Some(bill.clone());
+
+                        // PDF button with green color if PDF exists
+                        let pdf_exists = bill.pdf_data.is_some();
+                        let pdf_button = if pdf_exists {
+                            egui::Button::new("💾 Save PDF")
+                                .fill(egui::Color32::from_rgb(60, 150, 60))
+                        } else {
+                            egui::Button::new("📄 Generate PDF")
+                        };
+
+                        if ui.add(pdf_button).clicked() {
+                            if pdf_exists {
+                                bill_to_save_pdf = Some(bill.id);
+                            } else {
+                                bill_to_generate_pdf = Some(bill.id);
+                            }
                         }
                     });
                 });
@@ -142,14 +157,23 @@ fn show_bills_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
         app.editing_bill = Some(bill);
         app.show_bill_form = true;
     }
-    if let Some(bill) = bill_to_pdf {
-        match app.generate_pdf(&bill) {
+    if let Some(bill_id) = bill_to_generate_pdf {
+        match app.generate_pdf(bill_id) {
             Ok(_) => {
-                // Success - could show a notification
-                println!("PDF generated: invoice_{}.pdf", bill.id);
+                println!("PDF generated successfully");
             }
             Err(e) => {
-                eprintln!("Failed to generate PDF: {}", e);
+                app.bill_error = Some(format!("Failed to generate PDF: {}", e));
+            }
+        }
+    }
+    if let Some(bill_id) = bill_to_save_pdf {
+        match app.save_pdf_to_file(bill_id) {
+            Ok(_) => {
+                println!("PDF saved successfully");
+            }
+            Err(e) => {
+                app.bill_error = Some(format!("Failed to save PDF: {}", e));
             }
         }
     }
