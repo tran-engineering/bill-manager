@@ -1,12 +1,38 @@
-#import "@preview/payqr-swiss:0.4.0": swiss-qr-bill,
+#import "@preview/payqr-swiss:0.4.0": swiss-qr-bill
 
 #set page(
   paper: "a4",
-  margin: 0mm,
+  margin: 10mm,
 )
+
+#align(right)[
+  #image(
+    "logo.svg",
+    width: 45mm,
+  )
+]
+
+Rechnungssteller
+
+{{creditor-name}} \
+{{creditor-street}} \
+{{creditor-building}} \
+{{creditor-postal-code}} \
+{{creditor-city}} \
+{{creditor-country}}
+
+#box(width: 80%)[
+  #table(
+  columns: (1fr, auto, auto),
+  align: horizon,
+  table.header([], [aa], [aa]),
+  [aa], [bb], [cc]
+  )
+]
+
 #place(
   bottom + left,
-  dx: 0mm,
+  dx: -10mm,
   dy: 0mm,
 )[
   #swiss-qr-bill(

@@ -98,6 +98,7 @@ fn show_bills_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
     let mut bill_to_edit: Option<Bill> = None;
     let mut bill_to_generate_pdf: Option<u64> = None;
     let mut bill_to_save_pdf: Option<u64> = None;
+    let mut status_changes: Vec<(u64, BillStatus)> = Vec::new();
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         for bill in app.bills.clone().iter() {
@@ -116,7 +117,33 @@ fn show_bills_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
                         ui.label(format!("Date: {}", bill.date.format("%Y-%m-%d")));
                         ui.label(format!("Due: {}", bill.due_date.format("%Y-%m-%d")));
                         ui.label(format!("Total: CHF {:.2}", bill.total()));
-                        ui.label(format!("Status: {}", bill.status));
+
+                        // Status dropdown
+                        ui.horizontal(|ui| {
+                            ui.label("Status:");
+                            let mut current_status = bill.status;
+                            egui::ComboBox::from_id_salt(format!("status_{}", bill.id))
+                                .selected_text(format!("{}", current_status))
+                                .show_ui(ui, |ui| {
+                                    if ui.selectable_value(&mut current_status, BillStatus::Draft, "Draft").clicked() {
+                                        status_changes.push((bill.id, BillStatus::Draft));
+                                    }
+                                    if ui.selectable_value(&mut current_status, BillStatus::Sent, "Sent").clicked() {
+                                        status_changes.push((bill.id, BillStatus::Sent));
+                                    }
+                                    if ui.selectable_value(&mut current_status, BillStatus::Paid, "Paid").clicked() {
+                                        status_changes.push((bill.id, BillStatus::Paid));
+                                    }
+                                    if ui.selectable_value(&mut current_status, BillStatus::Overdue, "Overdue").clicked() {
+                                        status_changes.push((bill.id, BillStatus::Overdue));
+                                    }
+                                });
+                        });
+
+                        // PDF creation date
+                        if let Some(pdf_created_at) = &bill.pdf_created_at {
+                            ui.label(format!("PDF: {}", pdf_created_at.format("%Y-%m-%d %H:%M")));
+                        }
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -127,19 +154,26 @@ fn show_bills_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
                             bill_to_edit = Some(bill.clone());
                         }
 
-                        // PDF button with green color if PDF exists
+                        // PDF buttons
                         let pdf_exists = bill.pdf_data.is_some();
-                        let pdf_button = if pdf_exists {
-                            egui::Button::new("💾 Save PDF")
-                                .fill(egui::Color32::from_rgb(60, 150, 60))
-                        } else {
-                            egui::Button::new("📄 Generate PDF")
-                        };
 
-                        if ui.add(pdf_button).clicked() {
-                            if pdf_exists {
+                        if pdf_exists {
+                            // Save PDF button (green)
+                            let save_button = egui::Button::new("💾 Save PDF")
+                                .fill(egui::Color32::from_rgb(60, 150, 60));
+                            if ui.add(save_button).clicked() {
                                 bill_to_save_pdf = Some(bill.id);
-                            } else {
+                            }
+
+                            // Regenerate PDF button (red)
+                            let regen_button = egui::Button::new("🔄 Regenerate")
+                                .fill(egui::Color32::from_rgb(180, 60, 60));
+                            if ui.add(regen_button).clicked() {
+                                bill_to_generate_pdf = Some(bill.id);
+                            }
+                        } else {
+                            // Generate PDF button (default)
+                            if ui.button("📄 Generate PDF").clicked() {
                                 bill_to_generate_pdf = Some(bill.id);
                             }
                         }
@@ -164,6 +198,7 @@ fn show_bills_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
             }
             Err(e) => {
                 app.bill_error = Some(format!("Failed to generate PDF: {}", e));
+                println!("Failed to generate PDF: {}", e)
             }
         }
     }
@@ -176,6 +211,11 @@ fn show_bills_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
                 app.bill_error = Some(format!("Failed to save PDF: {}", e));
             }
         }
+    }
+
+    // Apply status changes
+    for (bill_id, new_status) in status_changes {
+        app.update_bill_status(bill_id, new_status);
     }
 }
 
@@ -275,7 +315,7 @@ fn show_client_form_window(app: &mut BillManagerApp, ctx: &egui::Context) {
                 });
 
                 ui.separator();
-                ui.strong("Address");
+                ui.strong("Contact Address");
 
                 ui.horizontal(|ui| {
                     ui.label("Street:");
@@ -304,6 +344,43 @@ fn show_client_form_window(app: &mut BillManagerApp, ctx: &egui::Context) {
                 ui.horizontal(|ui| {
                     ui.label("Country:");
                     ui.text_edit_singleline(&mut client.address.country);
+                });
+
+                ui.separator();
+                ui.strong("Billing Address");
+
+                ui.horizontal(|ui| {
+                    ui.label("Name:");
+                    ui.text_edit_singleline(&mut client.billing_address.name);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Street:");
+                    let mut street = client.billing_address.street.clone().unwrap_or_default();
+                    ui.text_edit_singleline(&mut street);
+                    client.billing_address.street = Some(street);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Building Number:");
+                    let mut building = client.billing_address.building_number.clone().unwrap_or_default();
+                    ui.text_edit_singleline(&mut building);
+                    client.billing_address.building_number = Some(building);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Postal Code:");
+                    ui.text_edit_singleline(&mut client.billing_address.postal_code);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("City:");
+                    ui.text_edit_singleline(&mut client.billing_address.city);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Country:");
+                    ui.text_edit_singleline(&mut client.billing_address.country);
                 });
 
                 ui.separator();
@@ -477,6 +554,12 @@ fn show_bill_form_window(app: &mut BillManagerApp, ctx: &egui::Context) {
                                 if items_count > 1 && ui.button("🗑").clicked() {
                                     item_to_remove = Some(idx);
                                 }
+                            });
+
+                            // Note field
+                            ui.horizontal(|ui| {
+                                ui.label("Note:");
+                                ui.text_edit_singleline(&mut item.note);
                             });
                         });
                     }

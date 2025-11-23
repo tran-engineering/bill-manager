@@ -34,7 +34,13 @@ impl Database {
                 address_building_number TEXT,
                 address_postal_code TEXT NOT NULL,
                 address_city TEXT NOT NULL,
-                address_country TEXT NOT NULL
+                address_country TEXT NOT NULL,
+                billing_address_name TEXT,
+                billing_address_street TEXT,
+                billing_address_building_number TEXT,
+                billing_address_postal_code TEXT,
+                billing_address_city TEXT,
+                billing_address_country TEXT
             );
 
             CREATE TABLE IF NOT EXISTS bills (
@@ -48,6 +54,7 @@ impl Database {
                 status TEXT NOT NULL,
                 items TEXT NOT NULL,
                 pdf_data BLOB,
+                pdf_created_at TEXT,
                 FOREIGN KEY (client_id) REFERENCES clients(id)
             );
 
@@ -70,6 +77,42 @@ impl Database {
         // Try to add the column (will fail silently if it already exists)
         self.conn.execute(
             "ALTER TABLE bills ADD COLUMN pdf_data BLOB",
+            [],
+        ).ok();
+
+        self.conn.execute(
+            "ALTER TABLE bills ADD COLUMN pdf_created_at TEXT",
+            [],
+        ).ok();
+
+        // Add billing address columns if they don't exist
+        self.conn.execute(
+            "ALTER TABLE clients ADD COLUMN billing_address_name TEXT",
+            [],
+        ).ok();
+
+        self.conn.execute(
+            "ALTER TABLE clients ADD COLUMN billing_address_street TEXT",
+            [],
+        ).ok();
+
+        self.conn.execute(
+            "ALTER TABLE clients ADD COLUMN billing_address_building_number TEXT",
+            [],
+        ).ok();
+
+        self.conn.execute(
+            "ALTER TABLE clients ADD COLUMN billing_address_postal_code TEXT",
+            [],
+        ).ok();
+
+        self.conn.execute(
+            "ALTER TABLE clients ADD COLUMN billing_address_city TEXT",
+            [],
+        ).ok();
+
+        self.conn.execute(
+            "ALTER TABLE clients ADD COLUMN billing_address_country TEXT",
             [],
         ).ok();
 
@@ -126,8 +169,10 @@ impl Database {
             self.conn.execute(
                 r#"INSERT INTO clients
                 (name, email, phone, address_name, address_street, address_building_number,
-                 address_postal_code, address_city, address_country)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+                 address_postal_code, address_city, address_country,
+                 billing_address_name, billing_address_street, billing_address_building_number,
+                 billing_address_postal_code, billing_address_city, billing_address_country)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"#,
                 params![
                     client.name,
                     client.email,
@@ -138,6 +183,12 @@ impl Database {
                     client.address.postal_code,
                     client.address.city,
                     client.address.country,
+                    client.billing_address.name,
+                    client.billing_address.street,
+                    client.billing_address.building_number,
+                    client.billing_address.postal_code,
+                    client.billing_address.city,
+                    client.billing_address.country,
                 ],
             )?;
             Ok(self.conn.last_insert_rowid() as u64)
@@ -147,8 +198,11 @@ impl Database {
                 r#"UPDATE clients SET
                 name = ?1, email = ?2, phone = ?3, address_name = ?4,
                 address_street = ?5, address_building_number = ?6,
-                address_postal_code = ?7, address_city = ?8, address_country = ?9
-                WHERE id = ?10"#,
+                address_postal_code = ?7, address_city = ?8, address_country = ?9,
+                billing_address_name = ?10, billing_address_street = ?11,
+                billing_address_building_number = ?12, billing_address_postal_code = ?13,
+                billing_address_city = ?14, billing_address_country = ?15
+                WHERE id = ?16"#,
                 params![
                     client.name,
                     client.email,
@@ -159,6 +213,12 @@ impl Database {
                     client.address.postal_code,
                     client.address.city,
                     client.address.country,
+                    client.billing_address.name,
+                    client.billing_address.street,
+                    client.billing_address.building_number,
+                    client.billing_address.postal_code,
+                    client.billing_address.city,
+                    client.billing_address.country,
                     client.id,
                 ],
             )?;
@@ -169,12 +229,41 @@ impl Database {
     pub fn get_all_clients(&self) -> Result<Vec<Client>> {
         let mut stmt = self.conn.prepare(
             r#"SELECT id, name, email, phone, address_name, address_street,
-               address_building_number, address_postal_code, address_city, address_country
+               address_building_number, address_postal_code, address_city, address_country,
+               billing_address_name, billing_address_street, billing_address_building_number,
+               billing_address_postal_code, billing_address_city, billing_address_country
                FROM clients ORDER BY name"#,
         )?;
 
         let clients = stmt
             .query_map([], |row| {
+                // For backward compatibility, if billing address is NULL, use regular address
+                let billing_name: Option<String> = row.get(10)?;
+                let billing_postal: Option<String> = row.get(13)?;
+                let billing_city: Option<String> = row.get(14)?;
+                let billing_country: Option<String> = row.get(15)?;
+
+                let billing_address = if billing_name.is_some() && billing_postal.is_some() && billing_city.is_some() && billing_country.is_some() {
+                    Address {
+                        name: billing_name.unwrap(),
+                        street: row.get(11)?,
+                        building_number: row.get(12)?,
+                        postal_code: billing_postal.unwrap(),
+                        city: billing_city.unwrap(),
+                        country: billing_country.unwrap(),
+                    }
+                } else {
+                    // Use regular address as billing address for backward compatibility
+                    Address {
+                        name: row.get(4)?,
+                        street: row.get(5)?,
+                        building_number: row.get(6)?,
+                        postal_code: row.get(7)?,
+                        city: row.get(8)?,
+                        country: row.get(9)?,
+                    }
+                };
+
                 Ok(Client {
                     id: row.get(0)?,
                     name: row.get(1)?,
@@ -188,6 +277,7 @@ impl Database {
                         city: row.get(8)?,
                         country: row.get(9)?,
                     },
+                    billing_address,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -221,8 +311,8 @@ impl Database {
             // Insert new bill
             self.conn.execute(
                 r#"INSERT INTO bills
-                (client_id, date, due_date, reference, iban, notes, status, items, pdf_data)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+                (client_id, date, due_date, reference, iban, notes, status, items, pdf_data, pdf_created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
                 params![
                     bill.client_id,
                     bill.date.to_rfc3339(),
@@ -233,6 +323,7 @@ impl Database {
                     status_str,
                     items_json,
                     bill.pdf_data.as_ref().map(|v| v.as_slice()),
+                    bill.pdf_created_at.as_ref().map(|dt| dt.to_rfc3339()),
                 ],
             )?;
             Ok(self.conn.last_insert_rowid() as u64)
@@ -241,8 +332,8 @@ impl Database {
             self.conn.execute(
                 r#"UPDATE bills SET
                 client_id = ?1, date = ?2, due_date = ?3, reference = ?4,
-                iban = ?5, notes = ?6, status = ?7, items = ?8, pdf_data = ?9
-                WHERE id = ?10"#,
+                iban = ?5, notes = ?6, status = ?7, items = ?8, pdf_data = ?9, pdf_created_at = ?10
+                WHERE id = ?11"#,
                 params![
                     bill.client_id,
                     bill.date.to_rfc3339(),
@@ -253,6 +344,7 @@ impl Database {
                     status_str,
                     items_json,
                     bill.pdf_data.as_ref().map(|v| v.as_slice()),
+                    bill.pdf_created_at.as_ref().map(|dt| dt.to_rfc3339()),
                     bill.id,
                 ],
             )?;
@@ -260,10 +352,10 @@ impl Database {
         }
     }
 
-    pub fn save_bill_pdf(&self, bill_id: u64, pdf_data: &[u8]) -> Result<()> {
+    pub fn save_bill_pdf(&self, bill_id: u64, pdf_data: &[u8], created_at: &chrono::DateTime<chrono::Local>) -> Result<()> {
         self.conn.execute(
-            "UPDATE bills SET pdf_data = ?1 WHERE id = ?2",
-            params![pdf_data, bill_id],
+            "UPDATE bills SET pdf_data = ?1, pdf_created_at = ?2 WHERE id = ?3",
+            params![pdf_data, created_at.to_rfc3339(), bill_id],
         )?;
         Ok(())
     }
@@ -283,7 +375,7 @@ impl Database {
 
     pub fn get_all_bills(&self) -> Result<Vec<Bill>> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, client_id, date, due_date, reference, iban, notes, status, items, pdf_data
+            r#"SELECT id, client_id, date, due_date, reference, iban, notes, status, items, pdf_data, pdf_created_at
                FROM bills ORDER BY date DESC"#,
         )?;
 
@@ -304,6 +396,13 @@ impl Database {
                 let date_str: String = row.get(2)?;
                 let due_date_str: String = row.get(3)?;
 
+                let pdf_created_at: Option<String> = row.get(10)?;
+                let pdf_created_at = pdf_created_at.and_then(|s| {
+                    chrono::DateTime::parse_from_rfc3339(&s)
+                        .ok()
+                        .map(|dt| dt.with_timezone(&chrono::Local))
+                });
+
                 Ok(Bill {
                     id: row.get(0)?,
                     client_id: row.get(1)?,
@@ -319,6 +418,7 @@ impl Database {
                     status,
                     items,
                     pdf_data: row.get(9)?,
+                    pdf_created_at,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

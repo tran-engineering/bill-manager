@@ -1,6 +1,7 @@
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use iso_11649::RfCreditorReference;
 
 use crate::db::Database;
 use crate::types::Address;
@@ -10,23 +11,26 @@ pub struct Client {
     pub id: u64,
     pub name: String,
     pub address: Address,
+    pub billing_address: Address,
     pub email: String,
     pub phone: String,
 }
 
 impl Default for Client {
     fn default() -> Self {
+        let default_address = Address::new(
+            String::new(),
+            Some(String::new()),
+            Some(String::new()),
+            String::new(),
+            String::new(),
+            "CH".to_string(),
+        );
         Self {
             id: 0,
             name: String::new(),
-            address: Address::new(
-                String::new(),
-                Some(String::new()),
-                Some(String::new()),
-                String::new(),
-                String::new(),
-                "CH".to_string(),
-            ),
+            address: default_address.clone(),
+            billing_address: default_address,
             email: String::new(),
             phone: String::new(),
         }
@@ -46,6 +50,7 @@ impl ItemTemplate {
             description: self.description.clone(),
             quantity: 1.0,
             unit_price: self.unit_price,
+            note: String::new(),
         }
     }
 }
@@ -65,6 +70,7 @@ pub struct BillItem {
     pub description: String,
     pub quantity: f64,
     pub unit_price: f64,
+    pub note: String,
 }
 
 impl BillItem {
@@ -79,6 +85,7 @@ impl Default for BillItem {
             description: String::new(),
             quantity: 1.0,
             unit_price: 0.0,
+            note: String::new(),
         }
     }
 }
@@ -96,6 +103,7 @@ pub struct Bill {
     pub status: BillStatus,
     #[serde(skip)]
     pub pdf_data: Option<Vec<u8>>,
+    pub pdf_created_at: Option<DateTime<Local>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -123,49 +131,16 @@ impl Bill {
     }
 
     pub fn generate_scor_reference(bill_id: u64, client_id: u64, year: i32) -> String {
+        
         // Format: YYYY-CCC-BBBB (year-client-bill) without separators for calculation
         // We'll add separators for display
-        let base = format!("{:04}{:03}{:04}0000000000000", year, client_id % 1000, bill_id % 10000);
+        let base = format!("{:04}Y{:03}K{:04}", year, (client_id+420) % 1000, (bill_id+4200) % 10000);
+        let rf = RfCreditorReference::new(base.as_str());
+        
 
         // Calculate ISO 11649 check digits for SCOR
-        let check_digits = Self::calculate_scor_check_digits(&base);
-
-        // Format with RF check digits and spacing for readability
-        format!("RF{}{}", check_digits, base)
+        rf.to_string()
     }
-
-    fn calculate_scor_check_digits(reference: &str) -> String {
-        // ISO 11649 calculation for SCOR references
-        // Convert letters to numbers (RF = 2927)
-        let extended = format!("{}RF00", reference);
-
-        let mut numeric = String::new();
-        for c in extended.chars() {
-            if c.is_ascii_digit() {
-                numeric.push(c);
-            } else if c.is_ascii_uppercase() {
-                // A=10, B=11, ..., Z=35
-                numeric.push_str(&((c as u32 - 'A' as u32 + 10).to_string()));
-            }
-        }
-
-        // Calculate mod 97
-        let remainder = Self::mod97(&numeric);
-        let check = 98 - remainder;
-
-        format!("{:02}", check)
-    }
-
-    fn mod97(number_str: &str) -> u32 {
-        let mut remainder = 0u32;
-        for digit in number_str.chars() {
-            if let Some(d) = digit.to_digit(10) {
-                remainder = (remainder * 10 + d) % 97;
-            }
-        }
-        remainder
-    }
-
 }
 
 impl Default for Bill {
@@ -184,6 +159,7 @@ impl Default for Bill {
             notes: String::new(),
             status: BillStatus::Draft,
             pdf_data: None,
+            pdf_created_at: None,
         }
     }
 }
@@ -390,16 +366,18 @@ impl BillManagerApp {
 
         // Generate PDF in memory
         let pdf_data = crate::pdf::generate_bill_pdf(bill, client, &self.creditor_address)?;
+        let now = Local::now();
 
         // Save to database
         let db = self.db.lock().unwrap();
-        db.save_bill_pdf(bill_id, &pdf_data)
+        db.save_bill_pdf(bill_id, &pdf_data, &now)
             .map_err(|e| format!("Failed to save PDF to database: {}", e))?;
         drop(db);
 
         // Update bill in memory
         if let Some(bill) = self.bills.iter_mut().find(|b| b.id == bill_id) {
             bill.pdf_data = Some(pdf_data);
+            bill.pdf_created_at = Some(now);
         }
 
         Ok(())
@@ -424,5 +402,13 @@ impl BillManagerApp {
         }
 
         Ok(())
+    }
+
+    pub fn update_bill_status(&mut self, bill_id: u64, new_status: BillStatus) {
+        if let Some(bill) = self.bills.iter_mut().find(|b| b.id == bill_id) {
+            bill.status = new_status;
+            let db = self.db.lock().unwrap();
+            db.save_bill(bill).ok();
+        }
     }
 }
