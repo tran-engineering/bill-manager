@@ -284,6 +284,53 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_bill_by_id(&self, id: u64) -> Result<Option<Bill>, Box<dyn Error>> {
+        let mut conn = self.get_conn()?;
+
+        let bill_db: Option<BillDb> = bills::table
+            .filter(bills::id.eq(id as i32))
+            .first::<BillDb>(&mut conn)
+            .optional()?;
+
+        if let Some(b) = bill_db {
+            let status = match b.status.as_str() {
+                "Draft" => BillStatus::Draft,
+                "Sent" => BillStatus::Sent,
+                "Paid" => BillStatus::Paid,
+                "Overdue" => BillStatus::Overdue,
+                _ => BillStatus::Draft,
+            };
+
+            let items: Vec<BillItem> = serde_json::from_str(&b.items).unwrap_or_default();
+
+            let pdf_created_at = b.pdf_created_at.and_then(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&chrono::Local))
+            });
+
+            Ok(Some(Bill {
+                id: b.id as u64,
+                client_id: b.client_id as u64,
+                date: chrono::DateTime::parse_from_rfc3339(&b.date)
+                    .unwrap()
+                    .with_timezone(&chrono::Local),
+                due_date: chrono::DateTime::parse_from_rfc3339(&b.due_date)
+                    .unwrap()
+                    .with_timezone(&chrono::Local),
+                reference: b.reference,
+                iban: b.iban,
+                notes: b.notes,
+                status,
+                items,
+                pdf_data: b.pdf_data,
+                pdf_created_at,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn get_all_bills(&self) -> Result<Vec<Bill>, Box<dyn Error>> {
         let mut conn = self.get_conn()?;
 

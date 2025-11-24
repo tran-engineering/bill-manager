@@ -100,8 +100,11 @@ fn show_bills_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
     let mut bill_to_save_pdf: Option<u64> = None;
     let mut status_changes: Vec<(u64, BillStatus)> = Vec::new();
 
+    // Fetch bills from database
+    let bills = app.get_bills().unwrap_or_default();
+
     egui::ScrollArea::vertical().show(ui, |ui| {
-        for bill in app.bills.clone().iter() {
+        for bill in bills.iter() {
             let client_name = app.get_client(bill.client_id)
                 .map(|c| c.name.clone())
                 .unwrap_or_else(|| "Unknown Client".to_string());

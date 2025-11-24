@@ -7,6 +7,25 @@ use iban::Iban;
 use crate::db::Database;
 use crate::types::Address;
 
+/// Sanitizes a string for use as a filename by replacing problematic characters
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            // Replace path separators and other problematic characters
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            // Replace whitespace with underscores
+            c if c.is_whitespace() => '_',
+            // Keep other characters
+            c => c,
+        })
+        .collect::<String>()
+        // Remove consecutive underscores
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<&str>>()
+        .join("_")
+}
+
 pub fn validate_iban(iban_str: &str) -> bool {
     // Remove spaces and convert to uppercase for validation
     let cleaned = iban_str.replace(" ", "").to_uppercase();
@@ -318,6 +337,7 @@ impl BillManagerApp {
         db.save_bill(&bill).expect("Failed to update bill");
         drop(db);
 
+        // Update in-memory cache
         if let Some(pos) = self.bills.iter().position(|b| b.id == bill.id) {
             self.bills[pos] = bill;
         }
@@ -341,6 +361,12 @@ impl BillManagerApp {
 
     pub fn get_client(&self, id: u64) -> Option<&Client> {
         self.clients.iter().find(|c| c.id == id)
+    }
+
+    pub fn get_bills(&self) -> Result<Vec<Bill>, String> {
+        let db = self.db.lock().unwrap();
+        db.get_all_bills()
+            .map_err(|e| format!("Failed to fetch bills: {}", e))
     }
 
     pub fn add_item_template(&mut self, mut template: ItemTemplate) {
@@ -372,14 +398,18 @@ impl BillManagerApp {
     }
 
     pub fn generate_pdf(&mut self, bill_id: u64) -> Result<(), String> {
-        let bill = self.bills.iter().find(|b| b.id == bill_id)
+        // Fetch bill from database
+        let db = self.db.lock().unwrap();
+        let bill = db.get_bill_by_id(bill_id)
+            .map_err(|e| format!("Database error: {}", e))?
             .ok_or_else(|| "Bill not found".to_string())?;
+        drop(db);
 
         let client = self.get_client(bill.client_id)
             .ok_or_else(|| "Client not found".to_string())?;
 
         // Generate PDF in memory
-        let pdf_data = crate::pdf::generate_bill_pdf(bill, client, &self.creditor_address)?;
+        let pdf_data = crate::pdf::generate_bill_pdf(&bill, client, &self.creditor_address)?;
         let now = Local::now();
 
         // Save to database
@@ -388,7 +418,7 @@ impl BillManagerApp {
             .map_err(|e| format!("Failed to save PDF to database: {}", e))?;
         drop(db);
 
-        // Update bill in memory
+        // Update bill in memory cache
         if let Some(bill) = self.bills.iter_mut().find(|b| b.id == bill_id) {
             bill.pdf_data = Some(pdf_data);
             bill.pdf_created_at = Some(now);
@@ -398,14 +428,26 @@ impl BillManagerApp {
     }
 
     pub fn save_pdf_to_file(&self, bill_id: u64) -> Result<Option<std::path::PathBuf>, String> {
+        let db = self.db.lock().unwrap();
+        let bill = db.get_bill_by_id(bill_id)
+            .map_err(|e| format!("Database error: {}", e))?
+            .ok_or_else(|| "Bill not found".to_string())?;
+        drop(db);
+
+        // Get client name for the filename
+        let client_name = self.get_client(bill.client_id)
+            .map(|c| sanitize_filename(&c.name))
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        let reference = sanitize_filename(&bill.reference);
+
         // Use native file dialog
         let file_dialog = rfd::FileDialog::new()
             .add_filter("PDF", &["pdf"])
-            .set_file_name(&format!("invoice_{}.pdf", bill_id));
+            .set_file_name(&format!("invoice_{}_{}.pdf", client_name, reference));
 
         if let Some(path) = file_dialog.save_file() {
-            let bill = self.bills.iter().find(|b| b.id == bill_id)
-                .ok_or_else(|| "Bill not found".to_string())?;
+            // Fetch bill from database
 
             if let Some(pdf_data) = &bill.pdf_data {
                 std::fs::write(&path, pdf_data)
