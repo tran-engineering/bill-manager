@@ -2,6 +2,9 @@
 name = "bill-manager"
 version = "0.1.0"
 edition = "2024"
+description = "A desktop application for managing invoices with Swiss QR bill generation"
+license = "MIT"
+authors = ["Khôi Tran <kt@compile.ch>"]
 
 [dependencies]
 qrcode = "0.14.1"
