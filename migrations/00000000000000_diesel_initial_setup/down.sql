@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS item_templates;
+DROP TABLE IF EXISTS bills;
+DROP TABLE IF EXISTS clients;
+DROP TABLE IF EXISTS settings;

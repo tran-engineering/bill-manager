@@ -1,6 +1,8 @@
 mod app;
 mod db;
+mod models;
 mod pdf;
+mod schema;
 mod types;
 mod ui;
 
