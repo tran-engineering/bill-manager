@@ -209,7 +209,7 @@ fn create_typst_invoice(bill: &Bill, client: &Client, creditor: &Address) -> Str
         if !all.is_empty() {
             all.push_str(", ");
         }
-        all.push_str(&format!("[{}], [{}], [{}], [{:.2}], [{:.2}]", item.note, item.description, item.quantity, item.unit_price, item.total()));
+        all.push_str(&format!("[{}], [{}], [{}], [{:.2}], [{:.2}]", item.note, item.item_type, item.quantity, item.unit_price, item.total()));
         all
     });
 

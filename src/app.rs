@@ -2,9 +2,23 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use iso_11649::RfCreditorReference;
+use iban::Iban;
 
 use crate::db::Database;
 use crate::types::Address;
+
+pub fn validate_iban(iban_str: &str) -> bool {
+    // Remove spaces and convert to uppercase for validation
+    let cleaned = iban_str.replace(" ", "").to_uppercase();
+
+    // Check if empty
+    if cleaned.is_empty() {
+        return false;
+    }
+
+    // Try to parse as IBAN
+    cleaned.parse::<Iban>().is_ok()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Client {
@@ -40,14 +54,14 @@ impl Default for Client {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemTemplate {
     pub id: u64,
-    pub description: String,
+    pub item_type: String,
     pub unit_price: f64,
 }
 
 impl ItemTemplate {
     pub fn to_bill_item(&self) -> BillItem {
         BillItem {
-            description: self.description.clone(),
+            item_type: self.item_type.clone(),
             quantity: 1.0,
             unit_price: self.unit_price,
             note: String::new(),
@@ -59,7 +73,7 @@ impl Default for ItemTemplate {
     fn default() -> Self {
         Self {
             id: 0,
-            description: String::new(),
+            item_type: String::new(),
             unit_price: 0.0,
         }
     }
@@ -67,7 +81,7 @@ impl Default for ItemTemplate {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BillItem {
-    pub description: String,
+    pub item_type: String,
     pub quantity: f64,
     pub unit_price: f64,
     pub note: String,
@@ -82,7 +96,7 @@ impl BillItem {
 impl Default for BillItem {
     fn default() -> Self {
         Self {
-            description: String::new(),
+            item_type: String::new(),
             quantity: 1.0,
             unit_price: 0.0,
             note: String::new(),

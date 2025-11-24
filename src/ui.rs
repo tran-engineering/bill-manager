@@ -1,7 +1,7 @@
 use eframe::egui;
 use chrono::Datelike;
 
-use crate::app::{Bill, BillItem, BillManagerApp, BillStatus, Client, ItemTemplate, Tab};
+use crate::app::{Bill, BillItem, BillManagerApp, BillStatus, Client, ItemTemplate, Tab, validate_iban};
 
 impl eframe::App for BillManagerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -292,6 +292,15 @@ fn show_settings_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
             if ui.text_edit_singleline(&mut app.default_iban).changed() {
                 settings_changed = true;
             }
+
+            // Show validation status
+            if !app.default_iban.is_empty() {
+                if validate_iban(&app.default_iban) {
+                    ui.colored_label(egui::Color32::from_rgb(60, 150, 60), "✓ Valid");
+                } else {
+                    ui.colored_label(egui::Color32::from_rgb(180, 60, 60), "✗ Invalid IBAN");
+                }
+            }
         });
     });
 
@@ -503,6 +512,20 @@ fn show_bill_form_window(app: &mut BillManagerApp, ctx: &egui::Context) {
                     });
 
                     ui.horizontal(|ui| {
+                        ui.label("IBAN:");
+                        ui.text_edit_singleline(&mut bill.iban);
+
+                        // Show validation status
+                        if !bill.iban.is_empty() {
+                            if validate_iban(&bill.iban) {
+                                ui.colored_label(egui::Color32::from_rgb(60, 150, 60), "✓ Valid");
+                            } else {
+                                ui.colored_label(egui::Color32::from_rgb(180, 60, 60), "✗ Invalid IBAN");
+                            }
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
                         ui.label("Status:");
                         egui::ComboBox::from_id_salt("status_select")
                             .selected_text(format!("{}", bill.status))
@@ -532,8 +555,8 @@ fn show_bill_form_window(app: &mut BillManagerApp, ctx: &egui::Context) {
                     for (idx, item) in bill.items.iter_mut().enumerate() {
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
-                                ui.label("Description:");
-                                ui.text_edit_singleline(&mut item.description);
+                                ui.label("Type:");
+                                ui.text_edit_singleline(&mut item.item_type);
 
                                 // Add template button if templates exist
                                 if !item_templates.is_empty() {
@@ -541,8 +564,8 @@ fn show_bill_form_window(app: &mut BillManagerApp, ctx: &egui::Context) {
                                         .selected_text("📋")
                                         .show_ui(ui, |ui| {
                                             for template in &item_templates {
-                                                if ui.button(&template.description).clicked() {
-                                                    item.description = template.description.clone();
+                                                if ui.button(&template.item_type).clicked() {
+                                                    item.item_type = template.item_type.clone();
                                                     item.unit_price = template.unit_price;
                                                 }
                                             }
@@ -586,7 +609,7 @@ fn show_bill_form_window(app: &mut BillManagerApp, ctx: &egui::Context) {
                                 .selected_text("📋 Add from Template")
                                 .show_ui(ui, |ui| {
                                     for template in &item_templates {
-                                        if ui.button(&template.description).clicked() {
+                                        if ui.button(&template.item_type).clicked() {
                                             bill.items.push(template.to_bill_item());
                                         }
                                     }
@@ -619,8 +642,11 @@ fn show_bill_form_window(app: &mut BillManagerApp, ctx: &egui::Context) {
         if bill.client_id == 0 || app.get_client(bill.client_id).is_none() {
             // Show error message - keep the bill form open
             app.bill_error = Some("Please select a client before saving the bill.".to_string());
+        } else if !bill.iban.is_empty() && !validate_iban(&bill.iban) {
+            // Validate IBAN if provided
+            app.bill_error = Some("Invalid IBAN format. Please correct the IBAN before saving.".to_string());
         } else {
-            // Valid client selected, proceed with save
+            // Valid client selected and IBAN is valid, proceed with save
             app.bill_error = None;
             let bill = app.editing_bill.take().unwrap();
             if bill.id == 0 {
@@ -655,7 +681,7 @@ fn show_item_templates_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.strong(&template.description);
+                        ui.strong(&template.item_type);
                         ui.label(format!("CHF {:.2}", template.unit_price));
                     });
 
@@ -683,8 +709,8 @@ fn show_template_form_window(app: &mut BillManagerApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             if let Some(template) = &mut app.editing_template {
                 ui.horizontal(|ui| {
-                    ui.label("Description:");
-                    ui.text_edit_singleline(&mut template.description);
+                    ui.label("Type:");
+                    ui.text_edit_singleline(&mut template.item_type);
                 });
 
                 ui.horizontal(|ui| {

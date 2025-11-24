@@ -60,7 +60,7 @@ impl Database {
 
             CREATE TABLE IF NOT EXISTS item_templates (
                 id INTEGER PRIMARY KEY,
-                description TEXT NOT NULL,
+                item_type TEXT NOT NULL,
                 unit_price REAL NOT NULL
             );
             "#,
@@ -115,6 +115,29 @@ impl Database {
             "ALTER TABLE clients ADD COLUMN billing_address_country TEXT",
             [],
         ).ok();
+
+        // Migration: Rename description column to item_type in item_templates
+        // SQLite doesn't support RENAME COLUMN directly in older versions, so we check if the column exists
+        let has_description = self.conn
+            .prepare("SELECT description FROM item_templates LIMIT 1")
+            .is_ok();
+
+        if has_description {
+            // Create new table with correct schema
+            self.conn.execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS item_templates_new (
+                    id INTEGER PRIMARY KEY,
+                    item_type TEXT NOT NULL,
+                    unit_price REAL NOT NULL
+                );
+                INSERT INTO item_templates_new (id, item_type, unit_price)
+                SELECT id, description, unit_price FROM item_templates;
+                DROP TABLE item_templates;
+                ALTER TABLE item_templates_new RENAME TO item_templates;
+                "#,
+            ).ok();
+        }
 
         Ok(())
     }
@@ -443,15 +466,15 @@ impl Database {
         if template.id == 0 {
             // Insert new template
             self.conn.execute(
-                r#"INSERT INTO item_templates (description, unit_price) VALUES (?1, ?2)"#,
-                params![template.description, template.unit_price],
+                r#"INSERT INTO item_templates (item_type, unit_price) VALUES (?1, ?2)"#,
+                params![template.item_type, template.unit_price],
             )?;
             Ok(self.conn.last_insert_rowid() as u64)
         } else {
             // Update existing template
             self.conn.execute(
-                r#"UPDATE item_templates SET description = ?1, unit_price = ?2 WHERE id = ?3"#,
-                params![template.description, template.unit_price, template.id],
+                r#"UPDATE item_templates SET item_type = ?1, unit_price = ?2 WHERE id = ?3"#,
+                params![template.item_type, template.unit_price, template.id],
             )?;
             Ok(template.id)
         }
@@ -460,13 +483,13 @@ impl Database {
     pub fn get_all_item_templates(&self) -> Result<Vec<ItemTemplate>> {
         let mut stmt = self
             .conn
-            .prepare(r#"SELECT id, description, unit_price FROM item_templates ORDER BY description"#)?;
+            .prepare(r#"SELECT id, item_type, unit_price FROM item_templates ORDER BY item_type"#)?;
 
         let templates = stmt
             .query_map([], |row| {
                 Ok(ItemTemplate {
                     id: row.get(0)?,
-                    description: row.get(1)?,
+                    item_type: row.get(1)?,
                     unit_price: row.get(2)?,
                 })
             })?
