@@ -5,6 +5,8 @@
   margin: 10mm,
 )
 
+#set text(font: "Roboto")
+
 #align(right)[
   #image(
     "logo.svg",
@@ -12,13 +14,11 @@
   )
 ]
 
-Rechnungssteller
+*Rechnungssteller*
 
 {{creditor-name}} \
-{{creditor-street}} \
-{{creditor-building}} \
-{{creditor-postal-code}} \
-{{creditor-city}} \
+{{creditor-street}} \ {{creditor-building}} \
+{{creditor-postal-code}} {{creditor-city}} \
 {{creditor-country}}
 
 #box(width: 80%)[
@@ -26,14 +26,14 @@ Rechnungssteller
   columns: (1fr, auto, auto),
   align: horizon,
   table.header([], [aa], [aa]),
-  [aa], [bb], [cc]
+  {{table-contents}}
   )
 ]
 
 #place(
   bottom + left,
   dx: -10mm,
-  dy: 0mm,
+  dy: 10mm,
 )[
   #swiss-qr-bill(
     account: "{{account}}",

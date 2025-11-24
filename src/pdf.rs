@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::format;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::LazyLock;
@@ -198,6 +199,10 @@ fn create_typst_invoice(bill: &Bill, client: &Client, creditor: &Address) -> Str
 
     let amount_str = bill.total().to_string();
 
+    let table_contents = "[testbesch], [softw], [125.00]".to_string();
+
+    let bla = bill.items.iter().fold(String::new(), |all, item| all + format!("[{}], [{}], [{}], [{}], [{}]", item.note, item.description, item.quantity, item.unit_price, item.total()).to_string());
+
     let vars = HashMap::from([
         ("account", bill.iban.as_str()),
         ("creditor-name", creditor.name.as_str()),
@@ -217,6 +222,7 @@ fn create_typst_invoice(bill: &Bill, client: &Client, creditor: &Address) -> Str
         ("reference-type", "SCOR"),
         ("reference", bill.reference.as_str()),
         ("additional-info", bill.notes.as_str()),
+        ("table-contents", table_contents.as_str())
     ]);
 
     tpl.fill_with_hashmap(&vars)
