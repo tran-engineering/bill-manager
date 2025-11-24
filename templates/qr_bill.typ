@@ -13,7 +13,6 @@
     width: 45mm,
   )
 ]
-
 Rechnungssteller
 
 {{creditor-name}} \
@@ -23,10 +22,10 @@ Rechnungssteller
 
 #box(width: 80%)[
   #table(
-  columns: (1fr, auto, auto),
+  columns: (1fr, auto, auto, auto, auto),
   align: horizon,
-  table.header([], [aa], [aa]),
-  [aa], [bb], [cc]
+  table.header([Beschreibung], [Typ], [Anzahl], [Preis], [Total]),
+  [aa], [bb], [cc], [dd], [ee]
   )
 ]
 

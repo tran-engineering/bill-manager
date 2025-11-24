@@ -383,7 +383,7 @@ impl BillManagerApp {
         Ok(())
     }
 
-    pub fn save_pdf_to_file(&self, bill_id: u64) -> Result<(), String> {
+    pub fn save_pdf_to_file(&self, bill_id: u64) -> Result<Option<std::path::PathBuf>, String> {
         // Use native file dialog
         let file_dialog = rfd::FileDialog::new()
             .add_filter("PDF", &["pdf"])
@@ -396,12 +396,13 @@ impl BillManagerApp {
             if let Some(pdf_data) = &bill.pdf_data {
                 std::fs::write(&path, pdf_data)
                     .map_err(|e| format!("Failed to save PDF: {}", e))?;
+                return Ok(Some(path));
             } else {
                 return Err("PDF not generated yet".to_string());
             }
         }
 
-        Ok(())
+        Ok(None)
     }
 
     pub fn update_bill_status(&mut self, bill_id: u64, new_status: BillStatus) {

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::format;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use crate::app::{Bill, Client};
@@ -180,6 +180,12 @@ pub fn generate_bill_pdf(
 ) -> Result<Vec<u8>, String> {
     let typst_content = create_typst_invoice(bill, client, creditor);
 
+    // Write typst content to temp file for inspection
+    let temp_path = Path::new("typst-debug.typ");
+    fs::write(&temp_path, &typst_content)
+        .map_err(|e| format!("Failed to write debug file: {}", e))?;
+    eprintln!("Typst content written to: {}", temp_path.display());
+
     let world = TypstWorld::new(typst_content);
 
     let result = typst::compile(&world);
@@ -198,10 +204,19 @@ fn create_typst_invoice(bill: &Bill, client: &Client, creditor: &Address) -> Str
     let tpl = Template::new(&template_str);
 
     let amount_str = bill.total().to_string();
+    let table_rows = (bill.items.len()+1).to_string();
 
-    let table_contents = "[testbesch], [softw], [125.00]".to_string();
+    let mut table_contents = bill.items.iter().fold(String::new(), |mut all, item| {
+        if !all.is_empty() {
+            all.push_str(", ");
+        }
+        all.push_str(&format!("[{}], [{}], [{}], [{:.2}], [{:.2}]", item.note, item.description, item.quantity, item.unit_price, item.total()));
+        all
+    });
 
-    let bla = bill.items.iter().fold(String::new(), |all, item| all + format!("[{}], [{}], [{}], [{}], [{}]", item.note, item.description, item.quantity, item.unit_price, item.total()).to_string());
+    table_contents.push_str(&format!(", table.cell(colspan: 4)[*Zu unseren Gunsten*], [{:.2}]", bill.total()));
+
+    let additional_info = &format!("Zahlbar bis {}", bill.due_date.format("%d.%m.%Y"));
 
     let vars = HashMap::from([
         ("account", bill.iban.as_str()),
@@ -213,6 +228,12 @@ fn create_typst_invoice(bill: &Bill, client: &Client, creditor: &Address) -> Str
         ("creditor-country", creditor.country.as_str()),
         ("amount", amount_str.as_str()),
         ("currency", "CHF"),
+        ("client-name", client.name.as_str()),
+        ("client-street", client.address.street.as_deref().unwrap_or("")),
+        ("client-building", client.address.building_number.as_deref().unwrap_or("")),
+        ("client-postal-code", client.address.postal_code.as_str()),
+        ("client-city", client.address.city.as_str()),
+        ("client-country", client.address.country.as_str()),
         ("debtor-name", client.billing_address.name.as_str()),
         ("debtor-street", client.billing_address.street.as_deref().unwrap_or("")),
         ("debtor-building", client.billing_address.building_number.as_deref().unwrap_or("")),
@@ -221,8 +242,9 @@ fn create_typst_invoice(bill: &Bill, client: &Client, creditor: &Address) -> Str
         ("debtor-country", client.billing_address.country.as_str()),
         ("reference-type", "SCOR"),
         ("reference", bill.reference.as_str()),
-        ("additional-info", bill.notes.as_str()),
-        ("table-contents", table_contents.as_str())
+        ("additional-info", additional_info.as_str()),
+        ("table-contents", table_contents.as_str()),
+        ("table-rows", table_rows.as_str())
     ]);
 
     tpl.fill_with_hashmap(&vars)

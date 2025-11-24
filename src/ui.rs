@@ -204,8 +204,16 @@ fn show_bills_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
     }
     if let Some(bill_id) = bill_to_save_pdf {
         match app.save_pdf_to_file(bill_id) {
-            Ok(_) => {
-                println!("PDF saved successfully");
+            Ok(Some(path)) => {
+                println!("PDF saved successfully to: {}", path.display());
+                // Open the PDF with xdg-open
+                std::process::Command::new("xdg-open")
+                    .arg(&path)
+                    .spawn()
+                    .ok();
+            }
+            Ok(None) => {
+                println!("PDF save cancelled");
             }
             Err(e) => {
                 app.bill_error = Some(format!("Failed to save PDF: {}", e));
