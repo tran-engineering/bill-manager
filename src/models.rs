@@ -62,7 +62,6 @@ pub struct BillDb {
     pub iban: String,
     pub notes: String,
     pub status: String,
-    pub items: String,
     pub pdf_data: Option<Vec<u8>>,
     pub pdf_created_at: Option<String>,
 }
@@ -77,9 +76,28 @@ pub struct NewBill {
     pub iban: String,
     pub notes: String,
     pub status: String,
-    pub items: String,
     pub pdf_data: Option<Vec<u8>>,
     pub pdf_created_at: Option<String>,
+}
+
+#[derive(Queryable, Selectable, Identifiable, Associations, Debug, Clone)]
+#[diesel(table_name = bill_items)]
+#[diesel(belongs_to(BillDb, foreign_key = bill_id))]
+pub struct BillItemDb {
+    pub id: i32,
+    pub bill_id: i32,
+    pub item_template_id: i32,
+    pub quantity: f64,
+    pub note: String,
+}
+
+#[derive(Insertable, Debug, Clone)]
+#[diesel(table_name = bill_items)]
+pub struct NewBillItem {
+    pub bill_id: i32,
+    pub item_template_id: i32,
+    pub quantity: f64,
+    pub note: String,
 }
 
 #[derive(Queryable, Selectable, Identifiable, AsChangeset, Debug, Clone)]
@@ -88,6 +106,7 @@ pub struct ItemTemplateDb {
     pub id: i32,
     pub item_type: String,
     pub unit_price: f64,
+    pub unit: String,
 }
 
 #[derive(Insertable, Debug, Clone)]
@@ -95,4 +114,5 @@ pub struct ItemTemplateDb {
 pub struct NewItemTemplate {
     pub item_type: String,
     pub unit_price: f64,
+    pub unit: String,
 }

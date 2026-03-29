@@ -1,6 +1,16 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    bill_items (id) {
+        id -> Integer,
+        bill_id -> Integer,
+        item_template_id -> Integer,
+        quantity -> Double,
+        note -> Text,
+    }
+}
+
+diesel::table! {
     bills (id) {
         id -> Integer,
         client_id -> Integer,
@@ -10,7 +20,6 @@ diesel::table! {
         iban -> Text,
         notes -> Text,
         status -> Text,
-        items -> Text,
         pdf_data -> Nullable<Binary>,
         pdf_created_at -> Nullable<Text>,
     }
@@ -42,6 +51,7 @@ diesel::table! {
         id -> Integer,
         item_type -> Text,
         unit_price -> Double,
+        unit -> Text,
     }
 }
 
@@ -53,8 +63,11 @@ diesel::table! {
 }
 
 diesel::joinable!(bills -> clients (client_id));
+diesel::joinable!(bill_items -> bills (bill_id));
+diesel::joinable!(bill_items -> item_templates (item_template_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    bill_items,
     bills,
     clients,
     item_templates,

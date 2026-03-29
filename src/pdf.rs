@@ -16,10 +16,8 @@ use typst::{Library, LibraryExt, World};
 use typst_kit::fonts::{FontSearcher, FontSlot};
 use typst_pdf::PdfOptions;
 
-static LIBRARY: LazyLock<LazyHash<Library>> = LazyLock::new(|| {
-    LazyHash::new(Library::builder().build())
-});
-
+static LIBRARY: LazyLock<LazyHash<Library>> =
+    LazyLock::new(|| LazyHash::new(Library::builder().build()));
 
 struct TypstWorld {
     source: Source,
@@ -58,7 +56,8 @@ impl TypstWorld {
     }
 
     fn resolve_package(&self, spec: &PackageSpec) -> PackageResult<PathBuf> {
-        let package_dir = self.package_cache
+        let package_dir = self
+            .package_cache
             .join(spec.namespace.as_str())
             .join(spec.name.as_str())
             .join(spec.version.to_string());
@@ -72,7 +71,8 @@ impl TypstWorld {
     }
 
     fn download_package(&self, spec: &PackageSpec) -> PackageResult<PathBuf> {
-        let package_dir = self.package_cache
+        let package_dir = self
+            .package_cache
             .join(spec.namespace.as_str())
             .join(spec.name.as_str())
             .join(spec.version.to_string());
@@ -82,15 +82,16 @@ impl TypstWorld {
         }
 
         // Create the directory
-        fs::create_dir_all(&package_dir)
-            .map_err(|e| PackageError::Other(Some(format!("Failed to create package directory: {}", e).into())))?;
+        fs::create_dir_all(&package_dir).map_err(|e| {
+            PackageError::Other(Some(
+                format!("Failed to create package directory: {}", e).into(),
+            ))
+        })?;
 
         // Download from Typst package registry
         let url = format!(
             "https://packages.typst.org/{}/{}-{}.tar.gz",
-            spec.namespace,
-            spec.name,
-            spec.version
+            spec.namespace, spec.name, spec.version
         );
 
         // For now, return an error with instructions
@@ -103,7 +104,8 @@ impl TypstWorld {
                 spec,
                 url,
                 package_dir.display()
-            ).into()
+            )
+            .into(),
         )))
     }
 }
@@ -126,13 +128,14 @@ impl World for TypstWorld {
             Ok(self.source.clone())
         } else if let Some(package_spec) = id.package() {
             // Handle package files
-            let package_dir = self.resolve_package(package_spec)
+            let package_dir = self
+                .resolve_package(package_spec)
                 .map_err(|e| FileError::Package(e))?;
 
             let file_path = package_dir.join(id.vpath().as_rootless_path());
 
-            let text = fs::read_to_string(&file_path)
-                .map_err(|_| FileError::NotFound(file_path))?;
+            let text =
+                fs::read_to_string(&file_path).map_err(|_| FileError::NotFound(file_path))?;
 
             Ok(Source::new(id, text))
         } else {
@@ -143,21 +146,20 @@ impl World for TypstWorld {
     fn file(&self, id: FileId) -> FileResult<Bytes> {
         if let Some(package_spec) = id.package() {
             // Handle package files
-            let package_dir = self.resolve_package(package_spec)
+            let package_dir = self
+                .resolve_package(package_spec)
                 .map_err(|e| FileError::Package(e))?;
 
             let file_path = package_dir.join(id.vpath().as_rootless_path());
 
-            let data = fs::read(&file_path)
-                .map_err(|_| FileError::NotFound(file_path))?;
+            let data = fs::read(&file_path).map_err(|_| FileError::NotFound(file_path))?;
 
             Ok(Bytes::new(data))
         } else {
             // Handle local files relative to template directory
             let file_path = self.template_dir.join(id.vpath().as_rootless_path());
 
-            let data = fs::read(&file_path)
-                .map_err(|_| FileError::NotFound(file_path))?;
+            let data = fs::read(&file_path).map_err(|_| FileError::NotFound(file_path))?;
 
             Ok(Bytes::new(data))
         }
@@ -188,7 +190,8 @@ pub fn generate_bill_pdf(
     let world = TypstWorld::new(typst_content);
 
     let result = typst::compile(&world);
-    let document = result.output
+    let document = result
+        .output
         .map_err(|errors| format!("Typst compilation failed: {:?}", errors))?;
 
     let pdf_data = typst_pdf::pdf(&document, &PdfOptions::default())
@@ -203,17 +206,31 @@ fn create_typst_invoice(bill: &Bill, client: &Client, creditor: &Address) -> Str
     let tpl = Template::new(&template_str);
 
     let amount_str = bill.total().to_string();
-    let table_rows = (bill.items.len()+1).to_string();
+    let table_rows = (bill.items.len() + 1).to_string();
 
     let mut table_contents = bill.items.iter().fold(String::new(), |mut all, item| {
         if !all.is_empty() {
             all.push_str(", ");
         }
-        all.push_str(&format!("[{}], [{}], [{}], [{:.2}], [{:.2}]", item.note, item.item_type, item.quantity, item.unit_price, item.total()));
+        all.push_str(&format!(
+            "[{}], [{}], [{}], [{:.2}], [{:.2}]",
+            item.note,
+            item.item_type,
+            if item.unit.is_empty() {
+                format!("{:.2}", item.quantity)
+            } else {
+                format!("{:.2} ({})", item.quantity, item.unit)
+            },
+            item.unit_price,
+            item.total()
+        ));
         all
     });
 
-    table_contents.push_str(&format!(", table.cell(colspan: 4)[*Zu unseren Gunsten*], [{:.2}]", bill.total()));
+    table_contents.push_str(&format!(
+        ", table.cell(colspan: 4)[*Zu unseren Gunsten*], [{:.2}]",
+        bill.total()
+    ));
 
     let additional_info = &format!("Zahlbar bis {}", bill.due_date.format("%d.%m.%Y"));
 
@@ -221,29 +238,51 @@ fn create_typst_invoice(bill: &Bill, client: &Client, creditor: &Address) -> Str
         ("account", bill.iban.as_str()),
         ("creditor-name", creditor.name.as_str()),
         ("creditor-street", creditor.street.as_deref().unwrap_or("")),
-        ("creditor-building", creditor.building_number.as_deref().unwrap_or("")),
+        (
+            "creditor-building",
+            creditor.building_number.as_deref().unwrap_or(""),
+        ),
         ("creditor-postal-code", creditor.postal_code.as_str()),
         ("creditor-city", creditor.city.as_str()),
         ("creditor-country", creditor.country.as_str()),
         ("amount", amount_str.as_str()),
         ("currency", "CHF"),
         ("client-name", client.name.as_str()),
-        ("client-street", client.address.street.as_deref().unwrap_or("")),
-        ("client-building", client.address.building_number.as_deref().unwrap_or("")),
+        (
+            "client-street",
+            client.address.street.as_deref().unwrap_or(""),
+        ),
+        (
+            "client-building",
+            client.address.building_number.as_deref().unwrap_or(""),
+        ),
         ("client-postal-code", client.address.postal_code.as_str()),
         ("client-city", client.address.city.as_str()),
         ("client-country", client.address.country.as_str()),
         ("debtor-name", client.billing_address.name.as_str()),
-        ("debtor-street", client.billing_address.street.as_deref().unwrap_or("")),
-        ("debtor-building", client.billing_address.building_number.as_deref().unwrap_or("")),
-        ("debtor-postal-code", client.billing_address.postal_code.as_str()),
+        (
+            "debtor-street",
+            client.billing_address.street.as_deref().unwrap_or(""),
+        ),
+        (
+            "debtor-building",
+            client
+                .billing_address
+                .building_number
+                .as_deref()
+                .unwrap_or(""),
+        ),
+        (
+            "debtor-postal-code",
+            client.billing_address.postal_code.as_str(),
+        ),
         ("debtor-city", client.billing_address.city.as_str()),
         ("debtor-country", client.billing_address.country.as_str()),
         ("reference-type", "SCOR"),
         ("reference", bill.reference.as_str()),
         ("additional-info", additional_info.as_str()),
         ("table-contents", table_contents.as_str()),
-        ("table-rows", table_rows.as_str())
+        ("table-rows", table_rows.as_str()),
     ]);
 
     tpl.fill_with_hashmap(&vars)

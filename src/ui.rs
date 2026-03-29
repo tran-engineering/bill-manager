@@ -558,32 +558,36 @@ fn show_bill_form_window(app: &mut BillManagerApp, ctx: &egui::Context) {
                     for (idx, item) in bill.items.iter_mut().enumerate() {
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
-                                ui.label("Type:");
-                                ui.text_edit_singleline(&mut item.item_type);
-
-                                // Add template button if templates exist
-                                if !item_templates.is_empty() {
-                                    egui::ComboBox::from_id_salt(format!("template_{}", idx))
-                                        .selected_text("📋")
-                                        .show_ui(ui, |ui| {
-                                            for template in &item_templates {
-                                                if ui.button(&template.item_type).clicked() {
-                                                    item.item_type = template.item_type.clone();
-                                                    item.unit_price = template.unit_price;
-                                                }
+                                ui.label("Template:");
+                                let current_label = if item.item_template_id == 0 {
+                                    "— select —".to_string()
+                                } else {
+                                    item.item_type.clone()
+                                };
+                                egui::ComboBox::from_id_salt(format!("item_template_{}", idx))
+                                    .selected_text(current_label)
+                                    .show_ui(ui, |ui| {
+                                        for template in &item_templates {
+                                            if ui.selectable_label(item.item_template_id == template.id, &template.item_type).clicked() {
+                                                item.item_template_id = template.id;
+                                                item.item_type = template.item_type.clone();
+                                                item.unit_price = template.unit_price;
+                                                item.unit = template.unit.clone();
                                             }
-                                        });
-                                }
+                                        }
+                                    });
                             });
 
                             ui.horizontal(|ui| {
                                 ui.label("Quantity:");
                                 ui.add(egui::DragValue::new(&mut item.quantity).speed(0.1));
 
-                                ui.label("Unit Price:");
-                                ui.add(egui::DragValue::new(&mut item.unit_price).speed(0.1));
+                                if !item.unit.is_empty() {
+                                    ui.label(&item.unit);
+                                }
 
-                                ui.label(format!("Total: CHF {:.2}", item.total()));
+                                ui.label(format!("@ CHF {:.2}", item.unit_price));
+                                ui.label(format!("= CHF {:.2}", item.total()));
 
                                 if items_count > 1 && ui.button("🗑").clicked() {
                                     item_to_remove = Some(idx);
@@ -685,7 +689,11 @@ fn show_item_templates_tab(app: &mut BillManagerApp, ui: &mut egui::Ui) {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.strong(&template.item_type);
-                        ui.label(format!("CHF {:.2}", template.unit_price));
+                        if !template.unit.is_empty() {
+                            ui.label(format!("CHF {:.2} / {}", template.unit_price, template.unit));
+                        } else {
+                            ui.label(format!("CHF {:.2}", template.unit_price));
+                        }
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -714,6 +722,11 @@ fn show_template_form_window(app: &mut BillManagerApp, ctx: &egui::Context) {
                 ui.horizontal(|ui| {
                     ui.label("Type:");
                     ui.text_edit_singleline(&mut template.item_type);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Unit:");
+                    ui.text_edit_singleline(&mut template.unit);
                 });
 
                 ui.horizontal(|ui| {

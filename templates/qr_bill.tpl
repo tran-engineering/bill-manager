@@ -54,7 +54,7 @@
     } else {
       (bottom: 0.2pt + black)
     },
-    table.header([*Beschreibung*], [*Typ*], [*Anzahl*], [*Preis*], [*Total*]),
+    table.header([*Beschreibung*], [*Typ*], [*Anzahl*], [*Preis*], [*Total (CHF)*]),
     {{table-contents}}
   )
 ]

@@ -75,14 +75,17 @@ pub struct ItemTemplate {
     pub id: u64,
     pub item_type: String,
     pub unit_price: f64,
+    pub unit: String,
 }
 
 impl ItemTemplate {
     pub fn to_bill_item(&self) -> BillItem {
         BillItem {
+            item_template_id: self.id,
             item_type: self.item_type.clone(),
             quantity: 1.0,
             unit_price: self.unit_price,
+            unit: self.unit.clone(),
             note: String::new(),
         }
     }
@@ -94,15 +97,18 @@ impl Default for ItemTemplate {
             id: 0,
             item_type: String::new(),
             unit_price: 0.0,
+            unit: String::new(),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BillItem {
+    pub item_template_id: u64,
     pub item_type: String,
     pub quantity: f64,
     pub unit_price: f64,
+    pub unit: String,
     pub note: String,
 }
 
@@ -115,9 +121,11 @@ impl BillItem {
 impl Default for BillItem {
     fn default() -> Self {
         Self {
+            item_template_id: 0,
             item_type: String::new(),
             quantity: 1.0,
             unit_price: 0.0,
+            unit: String::new(),
             note: String::new(),
         }
     }

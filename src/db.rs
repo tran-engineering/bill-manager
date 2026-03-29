@@ -5,8 +5,9 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use std::error::Error;
 
 use crate::app::{Bill, BillItem, BillStatus, Client, ItemTemplate};
-use crate::models::*;
-use crate::schema::*;
+use crate::models::{BillDb, BillItemDb, ClientDb, ItemTemplateDb, NewBill, NewBillItem, NewClient, NewItemTemplate, Setting};
+use crate::schema::{bill_items, bills, clients, item_templates, settings};
+use std::collections::HashMap;
 use crate::types::Address;
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
@@ -218,7 +219,6 @@ impl Database {
     pub fn save_bill(&self, bill: &Bill) -> Result<u64, Box<dyn Error>> {
         let mut conn = self.get_conn()?;
 
-        let items_json = serde_json::to_string(&bill.items)?;
         let status_str = match bill.status {
             BillStatus::Draft => "Draft",
             BillStatus::Sent => "Sent",
@@ -226,7 +226,7 @@ impl Database {
             BillStatus::Overdue => "Overdue",
         };
 
-        if bill.id == 0 {
+        let bill_id: i32 = if bill.id == 0 {
             // Insert new bill
             let new_bill = NewBill {
                 client_id: bill.client_id as i32,
@@ -236,17 +236,14 @@ impl Database {
                 iban: bill.iban.clone(),
                 notes: bill.notes.clone(),
                 status: status_str.to_string(),
-                items: items_json,
                 pdf_data: bill.pdf_data.clone(),
                 pdf_created_at: bill.pdf_created_at.as_ref().map(|dt| dt.to_rfc3339()),
             };
 
-            let id = diesel::insert_into(bills::table)
+            diesel::insert_into(bills::table)
                 .values(&new_bill)
                 .returning(bills::id)
-                .get_result::<i32>(&mut conn)?;
-
-            Ok(id as u64)
+                .get_result::<i32>(&mut conn)?
         } else {
             // Update existing bill
             let bill_db = BillDb {
@@ -258,7 +255,6 @@ impl Database {
                 iban: bill.iban.clone(),
                 notes: bill.notes.clone(),
                 status: status_str.to_string(),
-                items: items_json,
                 pdf_data: bill.pdf_data.clone(),
                 pdf_created_at: bill.pdf_created_at.as_ref().map(|dt| dt.to_rfc3339()),
             };
@@ -267,8 +263,30 @@ impl Database {
                 .set(&bill_db)
                 .execute(&mut conn)?;
 
-            Ok(bill.id)
+            bill.id as i32
+        };
+
+        // Delete existing items and re-insert
+        diesel::delete(bill_items::table.filter(bill_items::bill_id.eq(bill_id)))
+            .execute(&mut conn)?;
+
+        let new_items: Vec<NewBillItem> = bill.items.iter()
+            .filter(|item| item.item_template_id != 0)
+            .map(|item| NewBillItem {
+                bill_id,
+                item_template_id: item.item_template_id as i32,
+                quantity: item.quantity,
+                note: item.note.clone(),
+            })
+            .collect();
+
+        if !new_items.is_empty() {
+            diesel::insert_into(bill_items::table)
+                .values(&new_items)
+                .execute(&mut conn)?;
         }
+
+        Ok(bill_id as u64)
     }
 
     pub fn save_bill_pdf(&self, bill_id: u64, pdf_data: &[u8], created_at: &chrono::DateTime<chrono::Local>) -> Result<(), Box<dyn Error>> {
@@ -282,6 +300,17 @@ impl Database {
             .execute(&mut conn)?;
 
         Ok(())
+    }
+
+    fn bill_item_from_row(item_db: BillItemDb, template: ItemTemplateDb) -> BillItem {
+        BillItem {
+            item_template_id: item_db.item_template_id as u64,
+            item_type: template.item_type,
+            quantity: item_db.quantity,
+            unit_price: template.unit_price,
+            unit: template.unit,
+            note: item_db.note,
+        }
     }
 
     pub fn get_bill_by_id(&self, id: u64) -> Result<Option<Bill>, Box<dyn Error>> {
@@ -301,7 +330,14 @@ impl Database {
                 _ => BillStatus::Draft,
             };
 
-            let items: Vec<BillItem> = serde_json::from_str(&b.items).unwrap_or_default();
+            let items_db: Vec<(BillItemDb, ItemTemplateDb)> = bill_items::table
+                .inner_join(item_templates::table)
+                .filter(bill_items::bill_id.eq(id as i32))
+                .load::<(BillItemDb, ItemTemplateDb)>(&mut conn)?;
+
+            let items: Vec<BillItem> = items_db.into_iter()
+                .map(|(item_db, template)| Self::bill_item_from_row(item_db, template))
+                .collect();
 
             let pdf_created_at = b.pdf_created_at.and_then(|s| {
                 chrono::DateTime::parse_from_rfc3339(&s)
@@ -338,6 +374,18 @@ impl Database {
             .order(bills::date.desc())
             .load::<BillDb>(&mut conn)?;
 
+        let all_items_db: Vec<(BillItemDb, ItemTemplateDb)> = bill_items::table
+            .inner_join(item_templates::table)
+            .load::<(BillItemDb, ItemTemplateDb)>(&mut conn)?;
+
+        let mut items_by_bill: HashMap<i32, Vec<BillItem>> = HashMap::new();
+        for (item_db, template) in all_items_db {
+            items_by_bill
+                .entry(item_db.bill_id)
+                .or_default()
+                .push(Self::bill_item_from_row(item_db, template));
+        }
+
         let bills = bills_db.into_iter().map(|b| {
             let status = match b.status.as_str() {
                 "Draft" => BillStatus::Draft,
@@ -347,13 +395,13 @@ impl Database {
                 _ => BillStatus::Draft,
             };
 
-            let items: Vec<BillItem> = serde_json::from_str(&b.items).unwrap_or_default();
-
             let pdf_created_at = b.pdf_created_at.and_then(|s| {
                 chrono::DateTime::parse_from_rfc3339(&s)
                     .ok()
                     .map(|dt| dt.with_timezone(&chrono::Local))
             });
+
+            let items = items_by_bill.remove(&b.id).unwrap_or_default();
 
             Bill {
                 id: b.id as u64,
@@ -379,6 +427,9 @@ impl Database {
 
     pub fn delete_bill(&self, id: u64) -> Result<(), Box<dyn Error>> {
         let mut conn = self.get_conn()?;
+
+        diesel::delete(bill_items::table.filter(bill_items::bill_id.eq(id as i32)))
+            .execute(&mut conn)?;
 
         diesel::delete(bills::table.filter(bills::id.eq(id as i32)))
             .execute(&mut conn)?;
@@ -406,6 +457,7 @@ impl Database {
             let new_template = NewItemTemplate {
                 item_type: template.item_type.clone(),
                 unit_price: template.unit_price,
+                unit: template.unit.clone(),
             };
 
             let id = diesel::insert_into(item_templates::table)
@@ -420,6 +472,7 @@ impl Database {
                 id: template.id as i32,
                 item_type: template.item_type.clone(),
                 unit_price: template.unit_price,
+                unit: template.unit.clone(),
             };
 
             diesel::update(item_templates::table.filter(item_templates::id.eq(template.id as i32)))
@@ -442,6 +495,7 @@ impl Database {
                 id: t.id as u64,
                 item_type: t.item_type,
                 unit_price: t.unit_price,
+                unit: t.unit,
             }
         }).collect();
 

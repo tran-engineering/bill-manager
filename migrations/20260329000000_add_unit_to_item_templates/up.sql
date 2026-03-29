@@ -1,0 +1,1 @@
+ALTER TABLE item_templates ADD COLUMN unit TEXT NOT NULL DEFAULT '';
